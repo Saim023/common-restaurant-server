@@ -252,6 +252,76 @@ async function run() {
       res.send(result);
     });
 
+    // Stats
+    app.get("/admin-stats", verifyToken, verifyAdmin, async (req, res) => {
+      const userStats = await userCollection?.estimatedDocumentCount();
+      const menuStats = await menuCollection?.estimatedDocumentCount();
+      const orderStats = await paymentCollection?.estimatedDocumentCount();
+
+      const revenueStats = await paymentCollection
+        .aggregate([
+          {
+            $group: {
+              _id: null,
+              totalRevenue: { $sum: "$price" },
+            },
+          },
+        ])
+        .toArray();
+
+      const revenue =
+        revenueStats.length > 0 ? revenueStats[0].totalRevenue : 0;
+
+      res.send({ userStats, menuStats, orderStats, revenue });
+    });
+
+    app.get("/order-stats", verifyToken, verifyAdmin, async (req, res) => {
+      const result = await paymentCollection
+        .aggregate([
+          {
+            $unwind: "$menuItemIds",
+          },
+          {
+            $set: {
+              menuItemIds: { $toObjectId: "$menuItemIds" },
+            },
+          },
+          {
+            $lookup: {
+              from: "menu",
+              localField: "menuItemIds",
+              foreignField: "_id",
+              as: "menuItems",
+            },
+          },
+
+          {
+            $unwind: "$menuItems",
+          },
+
+          {
+            $group: {
+              _id: "$menuItems.category",
+              quantity: { $sum: 1 },
+              revenue: { $sum: "$menuItems.price" },
+            },
+          },
+
+          {
+            $project: {
+              _id: 0,
+              category: "$_id",
+              quantity: "$quantity",
+              revenue: "$revenue",
+            },
+          },
+        ])
+        .toArray();
+
+      res.send(result);
+    });
+
+    // Mongodb connection
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
